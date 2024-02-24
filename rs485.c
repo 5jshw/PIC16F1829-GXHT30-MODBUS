@@ -12,9 +12,11 @@ static char cDataLen;	// 暂存数据长度
 static char cRxCrcHigh, cRxCrcLow;		// 暂存接收到的数据包的CRC校验和的高位和低位
 static char cCalcCrcHigh, cCalcCrcLow;	// 暂存计算出的CRC校验和的高位和低位
 static char cBufPtr;	// 一个指针 用于跟踪在数组中当前的写入位置
-static char cReAddr[3];	// 暂存寄存器地址
+static char cReAddr[2];	// 暂存寄存器地址
 static char cReValue[2];// 暂存寄存器数量
 static char cReData[8];	// 暂存寄存器数据
+static char CRC_Value[16], CRC_Len;
+
 
 void Rs485Initialise(char cAddr)	// 初始化 RS485 网络驱动程序 同时指定将发送数据的从机地址
 {
@@ -24,10 +26,10 @@ void Rs485Initialise(char cAddr)	// 初始化 RS485 网络驱动程序 同时指定将发送数据
   PIE1bits.RCIE = 1;			// 开启接收中断
 }
 
-char Rs485Process(void)			// 数据包效用判断
+char Rs485Process(void)		// 数据包效用判断
 {
-	char cPktReady;// 数据包状态
-	cPktReady = FALSE;			// 若地址错误 则为假
+	char cPktReady;			// 数据包状态
+	cPktReady = FALSE;		// 若地址错误 则为假
 	if(cRS485State == PKT_COMPLETE) // 检查数据包是否轮询完毕
 	{
 		if(cNetAddr == cOurAddr)	// 检查接收的地址位是否对应指定从机的地址位
@@ -168,83 +170,104 @@ char Rs485Decode(void)		// 解码从485接收到的数据包
 
 void Rs485SendPacket(char sCmd, char sLen, char *sReAddr, char *sReValue, char *sReData) // 通过RS485链路发送数据包
 {
-	char CmdValue;
+	unsigned int CRC16;
+	char i;
 	PIE1bits.RCIE = 0;	// 关闭接收中断
 	T_RO = 0;
 	__delay_ms(2);		// 缓冲时间
-	CRC16_Init();		// 复位CRC
-	// Send some NULL preamblesfopr receiving UART 为接收 UART 发送一些 NULL 前置码
-	//for (c=0; c < NUM_TX_PREAMBLE; c++) Rs485SendChar(0x00);	// 发送3次 NULL 清空发送缓存
-	Rs485UpdataCrc(cOurAddr);
-	Rs485SendChar(cOurAddr);		// 发送从机地址
-	Rs485UpdataCrc(sCmd);
-	Rs485SendChar(sCmd);			// 发送控制命令
-	CmdValue = PacketHasPayload(sCmd);
-	switch(CmdValue)
+	// CRC校验前准备
+	CRC_Value[0] = cOurAddr;
+	CRC_Value[1] = sCmd;
+	switch(CRC_Value[1])
 	{
-		case	1:	// 命令：读保持寄存器 0x03
-			Rs485UpdataCrc(sLen);			// 数据长度
-			Rs485SendChar(sLen);
-			Rs485UpdataCrc(sReData[0]);		// 数据高字节
-			Rs485SendChar(sReData[0]);
-			Rs485UpdataCrc(sReData[1]);		// 数据低字节
-			Rs485SendChar(sReData[1]);
-			break;
-		case	2:	// 命令：读输入寄存器 0x04
-			Rs485UpdataCrc(sLen);			// 数据长度
-			Rs485SendChar(sLen);
-			if(sLen == 2)	// 所需字节长度
+		case	0x04:	// 读输入寄存器
+			CRC_Value[2] = sLen;
+			switch(CRC_Value[2])
 			{
-				Rs485UpdataCrc(sReData[0]);		// 数据高字节
-				Rs485SendChar(sReData[0]);
-				Rs485UpdataCrc(sReData[1]);		// 数据低字节
-				Rs485SendChar(sReData[1]);
+				case	2:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Len = 5;
+				break;
+				case	4:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Value[5] = sReData[2];
+					CRC_Value[6] = sReData[3];
+					CRC_Len = 7;
+				break;
 			}
-			else if(sLen == 4)	// 所需字节长度
+		break;
+		case	0x03:	// 读保持寄存器
+			CRC_Value[2] = sLen;
+			switch(CRC_Value[2])
 			{
-				Rs485UpdataCrc(sReData[0]);		// 数据高字节
-				Rs485SendChar(sReData[0]);
-				Rs485UpdataCrc(sReData[1]);		// 数据低字节
-				Rs485SendChar(sReData[1]);
-				Rs485UpdataCrc(sReData[2]);		// 数据高字节
-				Rs485SendChar(sReData[2]);
-				Rs485UpdataCrc(sReData[3]);		// 数据低字节
-				Rs485SendChar(sReData[3]);
+				case	2:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Len = 5;
+				break;
+				case	4:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Value[5] = sReData[2];
+					CRC_Value[6] = sReData[3];
+					CRC_Len = 7;
+				break;
+				case	6:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Value[5] = sReData[2];
+					CRC_Value[6] = sReData[3];
+					CRC_Value[7] = sReData[4];
+					CRC_Value[8] = sReData[5];
+					CRC_Len = 9;
+				break;
+				case	8:
+					CRC_Value[3] = sReData[0];
+					CRC_Value[4] = sReData[1];
+					CRC_Value[5] = sReData[2];
+					CRC_Value[6] = sReData[3];
+					CRC_Value[7] = sReData[4];
+					CRC_Value[8] = sReData[5];
+					CRC_Value[9] = sReData[6];
+					CRC_Value[10] = sReData[7];
+					CRC_Len = 11;
+				break;
 			}
-			break;
-		case	3:	// 命令：写单个保持寄存器 0x06
-			Rs485UpdataCrc(sReAddr[0]);		// 数据地址高字节
-			Rs485SendChar(sReAddr[0]);
-			Rs485UpdataCrc(sReAddr[1]);		// 数据地址低字节
-			Rs485SendChar(sReAddr[1]);
-			Rs485UpdataCrc(sReData[0]);		// 数据高字节
-			Rs485SendChar(sReData[0]);
-			Rs485UpdataCrc(sReData[1]);		//数据低字节
-			Rs485SendChar(sReData[1]);
-			break;
-		case	4:	// 命令：写多个保持寄存器 0x10
-			Rs485UpdataCrc(sReAddr[0]);		// 数据地址高字节
-			Rs485SendChar(sReAddr[0]);
-			Rs485UpdataCrc(sReAddr[1]);		// 数据地址低字节
-			Rs485SendChar(sReAddr[1]);
-			Rs485UpdataCrc(sReValue[0]);	// 寄存器数量高字节
-			Rs485SendChar(sReValue[0]);
-			Rs485UpdataCrc(sReValue[1]);	// 寄存器数量低字节
-			Rs485SendChar(sReValue[1]);
-			break;
+		break;
+		case	0x06:	// 写单个保持寄存器
+			CRC_Value[2] = sReAddr[0];
+			CRC_Value[3] = sReAddr[1];
+			CRC_Value[4] = sReData[0];
+			CRC_Value[5] = sReData[1];
+			CRC_Len = 6;
+		break;
+		case	0x10:	// 写多个保持寄存器
+			CRC_Value[2] = sReAddr[0];
+			CRC_Value[3] = sReAddr[1];
+			CRC_Value[4] = sReValue[0];
+			CRC_Value[5] = sReValue[1];
+			CRC_Len = 6;
+		break;
 	}
+	CRC16 = ModBusCRC16(&CRC_Value[0], CRC_Len);
+	for(i = 0; i < CRC_Len; i++)
+	{
+		Rs485SendChar(CRC_Value[i]);
+	}
+	Rs485SendChar((char)((CRC16 & 0xFF00) >> 8));
+	Rs485SendChar((char)(CRC16 & 0x00FF));
 
-	Rs485SendChar(cCalcCrcHigh);	// 发送CRC校验码高字节
-	Rs485SendChar(cCalcCrcLow);		// 发送CRC校验码低字节
 	__delay_ms(1);
 	T_RO = 1;
-	PIE1bits.RCIE = 1;				// Enable Receive Interrupt 打开接收中断
+	PIE1bits.RCIE = 1;		// 打开接收中断
 }
 
-void Rs485GetPacket(char gCmd, char *gReAddr, char *gReValue, char *gReData) // 将数据传递给主程序
+void Rs485GetPacket(char *gCmd, char *gReAddr, char *gReValue, char *gReData) // 将数据传递给主程序
 {
 	char c;				// 循环计数
-	gCmd = cCommand;	// 传递控制命令
+	*gCmd = cCommand;	// 传递控制命令
 	gReAddr[0] = cReAddr[0];	// 传递寄存器地址
 	gReAddr[1] = cReAddr[1];
 	gReValue[0] = cReValue[0];	// 传递寄存器数量
@@ -255,49 +278,7 @@ void Rs485GetPacket(char gCmd, char *gReAddr, char *gReValue, char *gReData) // 
 	}
 }
 
-/*
-{
-const char CRC16_LookupHigh[16] = {	// CRC16 查找表（高字节和低字节），每次迭代 4 位。
-		  0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70,
-		  0x81, 0x91, 0xA1, 0xB1, 0xC1, 0xD1, 0xE1, 0xF1
-};	// CRC 查找表
-const char CRC16_LookupLow[16] = {
-		  0x00, 0x21, 0x42, 0x63, 0x84, 0xA5, 0xC6, 0xE7,
-		  0x08, 0x29, 0x4A, 0x6B, 0x8C, 0xAD, 0xCE, 0xEF
-};
-
-void CRC16_Init(void) // CRC初始化
-{
-	// 根据 CCITT 规范将 CRC 初始化为 0xFFFF
-	cCalcCrcHigh = 0xFF;
-	cCalcCrcLow = 0xFF;
-}
-
-void CRC16_Updata4Bits(char val) // 更新4位CRC
-{
-	char t;
-	// 第一步，提取 CRC 寄存器中最重要的 4 个比特
-	t = cCalcCrcHigh >> 4;	// 将高位寄存器向右移动4位存放进变量里
-	// 将信息数据按位异或到提取的比特中
-	t = t ^ val;			// 按位异或
-	// 将CRC寄存器左移4位
-	cCalcCrcHigh = (cCalcCrcHigh << 4) | (cCalcCrcLow >> 4);	// 合并
-	cCalcCrcLow = cCalcCrcLow << 4;		// 将低位寄存器向左移动4位
-	// 进行查表，并将结果异或到 CRC 表中
-	cCalcCrcHigh = cCalcCrcHigh ^ CRC16_LookupHigh[t];	// 与CRC高字节查找表按位异或
-	cCalcCrcLow = cCalcCrcLow ^ CRC16_LookupLow[t];		// 与CRC低字节查找表按位异或
-}
-
-void Rs485UpdataCrc(char cVal) // 更新CRC
-{
-	CRC16_Updata4Bits(cVal >> 4);	// 处理CRC高字节
-	CRC16_Updata4Bits(cVal & 0x0F);	// 处理CRC低字节
-}
-}
-*/
-
-
-unsigned int ModBusCRC16(unsigned char *data, unsigned int len)
+unsigned int ModBusCRC16(char *data, char len)	// CRC16-MODBUS校验
 {
     unsigned int i, j, tmp, CRC16;
 
@@ -315,13 +296,8 @@ unsigned int ModBusCRC16(unsigned char *data, unsigned int len)
             }
         }
     }
-/*根据需要对结果进行处理*/
-//    data[i++] = (unsigned char) (CRC16 & 0x00FF);
-//    data[i++] = (unsigned char) ((CRC16 & 0xFF00)>>8);
     return CRC16;
 }
-
-
 
 void Rs485SendChar(char c) // 发送一字节
 {
@@ -331,76 +307,93 @@ void Rs485SendChar(char c) // 发送一字节
 
 char PostValidataPacket(void) // 验证接收的数据CRC校验码
 {
-	CRC16_Init();	// 初始化
-	Rs485UpdataCrc(cNetAddr);		// 地址
-	Rs485UpdataCrc(cCommand);		// 控制命令
-	Rs485UpdataCrc(cReAddr[0]);		// 寄存器地址高字节
-	Rs485UpdataCrc(cReAddr[1]);		// 寄存器地址低字节
-	if(cCommand == WRITE_MHOLDRE)	// 0x10 写多个保持寄存器
-	{	// 寄存器数量 字节长度 寄存器数据
-		Rs485UpdataCrc(cReValue[0]);
-		Rs485UpdataCrc(cReValue[1]);
-		Rs485UpdataCrc(cDataLen);
-		for(cBufPtr = 0; cBufPtr < cDataLen; cBufPtr++)
-		{
-			Rs485UpdataCrc(cReData[cBufPtr]);
-		}
-	}
-	else if(cCommand == WRITE_SHOLDRE)	// 0x06 写单个保持寄存器
-	{	// 寄存器数据
-		Rs485UpdataCrc(cReData[0]);
-		Rs485UpdataCrc(cReData[1]);
-	}
-	else if(cCommand == READ_HOLDRE || cCommand == READ_INPUTRE)	// 0x03 0x04	读保持寄存器 读输入寄存器
-	{	// 寄存器数量
-		Rs485UpdataCrc(cReValue[0]);
-		Rs485UpdataCrc(cReValue[1]);
-	}
+	unsigned int CRC16;
+	ReadCRCValue();
+	CRC16 = ModBusCRC16(&CRC_Value[0], CRC_Len);
 
-	// 检查 CRC 是否正确
-	// 并将更新后的状态作为结果返回
-	if((cRxCrcHigh == cCalcCrcHigh) && (cRxCrcLow == cCalcCrcLow))	// 验证校验CRC与接收CRC是否相等
+	if((cRxCrcHigh == ((CRC16 & 0x00FF))) && (cRxCrcLow == ((CRC16 & 0xFF00) >> 8)))	// 验证校验CRC与接收CRC是否相等
 	{
-		cRS485State = PKT_VALID;	// 返回有效值
-		PORTCbits.RC7 = 1;
+		cRS485State = PKT_VALID;	// 返回有效值	
 	}
 	else	
 	{
-		//cRS485State = PKT_INVALID;	// 返回无效值
-		cRS485State = PKT_VALID;	// 返回有效值
+		cRS485State = PKT_INVALID;	// 返回无效值
 	}
 	return cRS485State; // 返回计算后状态机指示器
 }
 
-char PacketHasPayload(char ccCommand)	// 检查控制命令类型
+void ReadCRCValue(void)	// 接收数据进行CRC校验前准备工作
 {
-	char Cmd;
-	PIE1bits.RCIE = 0;		// 关闭接收中断
-	
-	if(ccCommand == READ_HOLDRE)		// 0x03读取保持寄存器
+	CRC_Value[0] = cNetAddr;
+	CRC_Value[1] = cCommand;
+	CRC_Value[2] = cReAddr[0];
+	CRC_Value[3] = cReAddr[1];
+	switch(cCommand)
 	{
-		Cmd = 1;
+		case	0x04:	// 读输入寄存器
+		{
+			CRC_Value[4] = cReValue[0];
+			CRC_Value[5] = cReValue[1];
+			CRC_Len = 6;
+		}
+		break;
+		case	0x03:	// 读保持寄存器
+		{
+			CRC_Value[4] = cReValue[0];
+			CRC_Value[5] = cReValue[1];
+			CRC_Len = 6;
+		}
+		break;
+		case	0x06:	// 写单个保持寄存器
+		{
+			CRC_Value[4] = cReData[0];
+			CRC_Value[5] = cReData[1];
+			CRC_Len = 6;
+		}
+		break;
+		case	0x10:	// 写多个保持寄存器
+		{
+			CRC_Value[4] = cReValue[0];
+			CRC_Value[5] = cReValue[1];
+			CRC_Value[6] = cDataLen;
+			switch(CRC_Value[6])
+			{
+				case	2:
+					CRC_Value[7] = cReData[0];
+					CRC_Value[8] = cReData[1];
+					CRC_Len = 9;
+					break;
+				case	4:
+					CRC_Value[7] = cReData[0];
+					CRC_Value[8] = cReData[1];
+					CRC_Value[9] = cReData[2];
+					CRC_Value[10] = cReData[3];
+					CRC_Len = 11;
+					break;
+				case	6:
+					CRC_Value[7] = cReData[0];
+					CRC_Value[8] = cReData[1];
+					CRC_Value[9] = cReData[2];
+					CRC_Value[10] = cReData[3];
+					CRC_Value[11] = cReData[4];
+					CRC_Value[12] = cReData[5];
+					CRC_Len = 13;
+					break;
+				case	8:
+					CRC_Value[7] = cReData[0];
+					CRC_Value[8] = cReData[1];
+					CRC_Value[9] = cReData[2];
+					CRC_Value[10] = cReData[3];
+					CRC_Value[11] = cReData[4];
+					CRC_Value[12] = cReData[5];
+					CRC_Value[13] = cReData[6];
+					CRC_Value[14] = cReData[7];
+					CRC_Len = 15;
+					break;
+			}
+		}
+		break;
 	}
-	else if(ccCommand == READ_INPUTRE)	// 0x04读取输入寄存器
-	{
-		Cmd = 2;
-	}
-	else if(ccCommand == WRITE_SHOLDRE)	// 0x06写单个保持寄存器
-	{
-		Cmd = 3;
-	}
-	else if(ccCommand == WRITE_MHOLDRE)	// 0x10写多个保持寄存器
-	{
-		Cmd = 4;
-	}
-	else	// 无效命令
-	{
-		Cmd = 0;
-	}
-	PIE1bits.RCIE = 1;		// 打开接收中断
-	return Cmd;
 }
-
-
 
 

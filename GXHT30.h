@@ -19,8 +19,8 @@ void IIC_Stop(void);	// 结束信号
 void IIC_Ack(void);		// 应答信号
 void IIC_NAck(void);	// 不应答信号
 unsigned char IIC_WAck(void);			// 等待应答
-void IIC_SendByte(unsigned int txd);	// 发送字节
-unsigned char IIC_ReadByte(unsigned int ack);	// 接收字节
+void IIC_SendByte(unsigned char txd);	// 发送字节
+unsigned char IIC_ReadByte(unsigned char ack);	// 接收字节
 void GXHT30_read_result(unsigned char addr);	// 读取温度
 void GXHT30_write_cmd(unsigned char addr, unsigned char MSB, unsigned char LSB);	// 发送控制命令
 void GXHT30_single_call(void);	// 单次调用
